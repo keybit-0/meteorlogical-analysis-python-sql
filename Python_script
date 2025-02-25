@@ -1,0 +1,117 @@
+# imports
+import mysql.connector
+import pygrib
+import numpy as np
+import cdsapi
+import datetime
+
+
+# insert given values into sql db
+def sqlWrite(_temp, _dew, _precip, _Date):
+    sql = "INSERT INTO meteorological_data (temp, dewtemp, precip, location, date_time) VALUES (%s, %s, %s, %s, %s)"
+    val = (_temp, _dew, _precip, 'W', _Date)
+    mycursor.execute(sql, val)
+    mydb.commit()
+    temp = 0
+    dew = 0
+    precip = 0
+
+
+# loop years , makes api call, save file, parse file, write to sql
+for x in range(1982, 2021, 1):
+    # Api
+    c = cdsapi.Client()
+    time = str(datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"))
+    c.retrieve('reanalysis-era5-land',
+    {
+        'format': 'grib',
+        'variable': [
+            '2m_dewpoint_temperature', '2m_temperature', 'total_precipitation',
+        ],
+        'year': str(x),
+        'month': [
+            '01', '02', '03',
+            '04', '05', '06',
+            '07', '08', '09',
+            '10', '11', '12',
+        ],
+        'day': [
+            '01', '02', '03',
+            '04', '05', '06',
+            '07', '08', '09',
+            '10', '11', '12',
+            '13', '14', '15',
+            '16', '17', '18',
+            '19', '20', '21',
+            '22', '23', '24',
+            '25', '26', '27',
+            '28', '29', '30',
+            '31',
+        ],
+        'time': [
+            '00:00', '01:00', '02:00',
+            '03:00', '04:00', '05:00',
+            '06:00', '07:00', '08:00',
+            '09:00', '10:00', '11:00',
+            '12:00', '13:00', '14:00',
+            '15:00', '16:00', '17:00',
+            '18:00', '19:00', '20:00',
+            '21:00', '22:00', '23:00',
+        ],
+        'area': [
+            53.76, -9.85, 53.26,
+            -9.35,
+        ],
+    }, "download-" + str(x) + "-" + time + ".grib")
+
+    # MYSQL connection
+    mydb = mysql.connector.connect(
+        host="localhost",
+        user="key",
+        password="123",
+        database="Project"
+    )
+    mycursor = mydb.cursor()
+
+    # open grib
+    grbs = pygrib.open("download-" + str(x) + "-" + time + ".grib")
+
+    # set variables
+    temp = 0
+    dew = 0
+    precip = 0
+    # set counters
+    j = 0
+    h = 0  # hour offset
+    daysOffset = 0
+    
+    # loop gribs , collect 3, sql write, repeat
+    for i in grbs:
+        j = j + 1
+        if(i.paramId == 167):
+            temp = np.average(i.values) 
+        elif(i.paramId == 168): 
+            dew = np.average(i.values) 
+        elif(i.paramId == 228): 
+            precip = np.average(i.values)
+        
+        if(j == 3):
+            j = 0
+            date_string = str(i.dataDate)
+            y = date_string[0] + date_string[1] + date_string[2] + date_string[3]
+            m = date_string[4] + date_string[5]
+            d = date_string[6] + date_string[7]
+
+            cTime = datetime(int(y), int(m), int(d), hour=h)
+            h = h + 1
+            sqlWrite(temp, dew, precip, cTime)
+        if(h == 24):
+            h = 0
+            
+            daysOffset = daysOffset + 1
+            print("days done: " + str(daysOffset))
+            
+    print("years done: " + str(x-1980))
+    # end of loop
+# end of file
+
